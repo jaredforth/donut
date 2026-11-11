@@ -1553,7 +1553,7 @@ class ResumeTests(unittest.IsolatedAsyncioTestCase):
             app.rename_session("fix login bug")
             await pilot.pause()
             project = Path(self.temp.name).name
-            self.assertIn(f"\x1b]0;fix-login-bug · {project} · Donut\x07", written)
+            self.assertIn((t := f"fix-login-bug · {project} · Donut", f"\x1b]1;{t}\x07\x1b]2;{t}\x07")[1], written)
             status = str(app.query_one("#status").render())
             self.assertIn("session fix-login-bug", status)
             written.clear()
@@ -1561,7 +1561,9 @@ class ResumeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(written, [])  # Only written when it changes.
             app.session_name = "evil\x07\x1b]0;x"
             app.show_title()
-            self.assertNotIn("\x1b]0;x", written[-1][4:])  # Control characters never reach the terminal.
+            self.assertNotIn("\x1b]0;x", written[-1])  # Control characters never reach the terminal.
+            self.assertEqual(written[-1].count("\x07"), 2)  # Only the two terminators, none inside a title.
+            self.assertEqual(written[-1].count("\x1b"), 2)
 
     async def test_next_and_prev_list_this_sessions_tickets(self):
         from donut import workspace
@@ -1594,6 +1596,29 @@ class ResumeTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Coming up", body)
             self.assertNotIn("Latest one", body)
             self.assertIn("COUNT is a positive number", await shown("/next zero"))
+
+    async def test_the_first_chat_message_names_the_window(self):
+        app = self.make_app()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            written = []
+            original = app._driver.write
+            app._driver.write = lambda data: (written.append(data), original(data))
+            project = Path(self.temp.name).name
+            for text in ("/foo", "   ", "!ls"):
+                app.name_task(text)
+            self.assertEqual(app.task_title, "")
+            folder = app.session_name
+            app.name_task("fix the login bug on mobile")
+            self.assertIn((t := f"fix the login bug on mobile · {project} · Donut", f"\x1b]1;{t}\x07\x1b]2;{t}\x07")[1], written)
+            written.clear()
+            app.name_task("something else")
+            self.assertEqual(written, [])
+            self.assertEqual(app.session_name, folder)
+            app.rename_session("x y")
+            app.show_title()
+            t = f"x-y · {project} · Donut"
+            self.assertEqual(written[-1], f"\x1b]1;{t}\x07\x1b]2;{t}\x07")
 
     async def test_running_background_shells_show_in_the_status_line(self):
         app = self.make_app()
