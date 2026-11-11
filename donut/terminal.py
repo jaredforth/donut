@@ -2305,8 +2305,9 @@ class Donut(App):
         self.shown_title = title
         driver = getattr(self, "_driver", None)
         if driver is not None:
-            # OSC 0 sets the window and tab title; control characters are left out so the title cannot escape.
-            driver.write("\x1b]0;" + "".join(c for c in title if c.isprintable()) + "\x07")
+            # OSC 1 sets the tab title and OSC 2 the window title (iTerm2 ignores OSC 0 here); control characters are left out so the title cannot escape.
+            clean = "".join(c for c in title if c.isprintable())
+            driver.write(f"\x1b]1;{clean}\x07\x1b]2;{clean}\x07")
 
     def rename_session(self, name):
         """Name this window's session: its tickets folder becomes .donut/<name>/ (spaces and the like -> -)."""
