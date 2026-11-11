@@ -605,6 +605,7 @@ class Draft(TextArea):
                 app.history_at = None
         else:
             return False
+        app.recalled = True  # one-shot: the Changed event from this load must not open the slash menu
         self.load_text(app.history_stash if app.history_at is None else app.history[app.history_at])
         self.move_cursor(self.document.end)
         return True
@@ -716,6 +717,7 @@ class Donut(App):
         self.history = []  # Sent messages, oldest first; Up/Down in the prompt walk them.
         self.history_at = None
         self.history_stash = ""
+        self.recalled = False
         self.steps = None  # The models auto chooses from, cheapest first; found on first use.
         # Simple or complex changes only what Donut shows and which defaults it starts with, never what a model
         # is told. Until the user has chosen (asked the first time Donut opens), everything is shown.
@@ -1537,12 +1539,13 @@ class Donut(App):
     def on_text_area_changed(self, event):
         menu = self.query_one(Menu)
         text = event.text_area.text
+        recalled, self.recalled = self.recalled, False
         event.text_area.set_class(text.startswith("!"), "-shell")
         if menu.kind == "pick":
             menu.filter(text)
         elif menu.kind == "approve":
             return
-        elif text.startswith("/") and not any(c.isspace() for c in text):
+        elif text.startswith("/") and not any(c.isspace() for c in text) and not recalled:
             if not menu.is_open:
                 menu.open("slash", "Commands", self.slash_rows())
             if not menu.filter(text):

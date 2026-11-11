@@ -167,6 +167,42 @@ class DraftTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(draft.cursor_location[0], 0)
                 self.assertEqual(draft.text, "a\nb")
 
+    async def test_recalled_slash_entry_does_not_open_menu(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app = self.app(temp)
+            app.execute = lambda text: None
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                draft = app.query_one(Draft)
+                for word in ("one", "/focus "):  # trailing space keeps the menu closed so Enter sends
+                    draft.insert(word)
+                    await pilot.press("enter")
+                    await pilot.pause()
+                await pilot.press("up")
+                await pilot.pause()
+                self.assertEqual(draft.text, "/focus")
+                self.assertFalse(app.query_one(Menu).is_open)
+                await pilot.press("up")
+                await pilot.pause()
+                self.assertEqual(draft.text, "one")
+
+    async def test_slash_opens_menu_after_recall(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app = self.app(temp)
+            app.execute = lambda text: None
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                draft = app.query_one(Draft)
+                draft.insert("one")
+                await pilot.press("enter")
+                await pilot.pause()
+                await pilot.press("up")
+                await pilot.pause()
+                draft.clear()
+                draft.insert("/")
+                await pilot.pause()
+                self.assertTrue(app.query_one(Menu).is_open)
+
     async def test_ctrl_c_reaches_cancel_while_editing(self):
         with tempfile.TemporaryDirectory() as temp:
             app = self.app(temp)
