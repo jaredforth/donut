@@ -14,6 +14,11 @@ from .setup import setup, discover
 from .ui import banner, welcome, release_version, paint
 from . import workspace
 
+try:
+    import readline  # noqa: F401  # Makes input() support Up/Down history and line editing; absent on Windows.
+except ImportError:
+    pass
+
 
 def plan_session(profile, alias, project, request=None, session=None):
     install(project, Path.home(), session=session)
