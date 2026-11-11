@@ -1,6 +1,7 @@
 """Donut's interactive terminal, backed by provider-owned sessions."""
 
 import asyncio
+import base64
 import copy
 import json
 import os
@@ -596,6 +597,39 @@ def dropped_images(text, project):
     return paths
 
 
+IMAGE_MAGIC = ((b"\x89PNG\r\n\x1a\n", "png"), (b"\xff\xd8\xff", "jpg"), (b"GIF8", "gif"))
+
+
+def pasted_image(text):
+    """(extension, bytes) if the paste is base64 image data (optional data: prefix, wrapped lines), else None."""
+    text = re.sub(r"^\s*data:image/[\w.+-]+;base64,", "", text)
+    text = re.sub(r"\s+", "", text)
+    if len(text) <= 100 or not re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", text):
+        return None
+    try:
+        data = base64.b64decode(text, validate=True)
+    except ValueError:
+        return None
+    for magic, ext in IMAGE_MAGIC:
+        if data.startswith(magic):
+            return ext, data
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp", data
+    return None
+
+
+def save_pasted_image(ext, data):
+    """Write the bytes under the temp folder and return the absolute path."""
+    folder = Path(tempfile.gettempdir()) / "donut-images"
+    folder.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    n = 1
+    while (path := folder / f"paste-{stamp}-{n}.{ext}").exists():
+        n += 1
+    path.write_bytes(data)
+    return str(path.resolve())
+
+
 class Draft(TextArea):
     """The prompt editor. Enter sends; Shift+Enter, Alt+Enter or Ctrl+J insert a newline.
 
@@ -632,6 +666,11 @@ class Draft(TextArea):
 
     async def _on_paste(self, event):
         paths = dropped_images(event.text, self.app.project)
+        if not paths and (image := pasted_image(event.text)):
+            try:
+                paths = [save_pasted_image(*image)]
+            except OSError:
+                pass  # insert the text unchanged
         if not paths:
             return  # Textual runs TextArea._on_paste next (handlers chain up the MRO)
         event.stop()

@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -6,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch, AsyncMock
 import shlex
 from textual import events
-from donut.terminal import dropped_images, Donut, Draft, Menu, OptionList, RichLog, Static
+from donut.terminal import dropped_images, pasted_image, Donut, Draft, Menu, OptionList, RichLog, Static
 
 # Never start real providers from the background usage refresh during tests.
 Donut.AUTO_REFRESH_QUOTAS = False
@@ -286,6 +287,47 @@ class DroppedImageTests(unittest.IsolatedAsyncioTestCase):
                 app.post_message(events.Paste("hello world"))
                 await pilot.pause()
                 self.assertEqual(draft.text, "hello world")
+
+
+class PastedImageTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.old = tempfile.tempdir
+        tempfile.tempdir = self.temp.name
+        self.addCleanup(self.cleanup)
+        self.png = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"0" * 200).decode()
+
+    def cleanup(self):
+        tempfile.tempdir = self.old
+        self.temp.cleanup()
+
+    def test_pasted_image_decodes_wrapped_and_prefixed(self):
+        wrapped = "\n".join(self.png[i:i + 76] for i in range(0, len(self.png), 76))
+        for text in (self.png, wrapped, "data:image/png;base64," + wrapped):
+            ext, data = pasted_image(text)
+            self.assertEqual((ext, data[:4]), ("png", b"\x89PNG"), text[:30])
+
+    def test_pasted_image_rejects_other_text(self):
+        for text in ("plain text", "A" * 300, "iVBORw0KGgo", base64.b64encode(b"hello world " * 30).decode()):
+            self.assertIsNone(pasted_image(text), text[:30])
+
+    async def test_pasted_image_paste_inserts_saved_path(self):
+        config = {"aliases": {"claude": {"engine": "claude"}}, "planner": "claude"}
+        with patch("donut.terminal.load", return_value=config):
+            app = Donut(Path(self.temp.name))
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            draft = app.query_one(Draft)
+            app.post_message(events.Paste(self.png))
+            await pilot.pause()
+            path = shlex.split(draft.text)[0]
+            self.assertTrue(path.endswith(".png"))
+            self.assertTrue(Path(path).read_bytes().startswith(b"\x89PNG\r\n\x1a\n"))
+            draft.load_text("")
+            with patch("donut.terminal.save_pasted_image", side_effect=OSError):
+                app.post_message(events.Paste(self.png))
+                await pilot.pause()
+            self.assertEqual(draft.text, self.png)
 
 
 class SlashMenuTests(unittest.IsolatedAsyncioTestCase):
