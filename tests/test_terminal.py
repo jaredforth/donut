@@ -144,6 +144,29 @@ class DraftTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(sent, ["first\nsecond\nthird"])
                 self.assertEqual(draft.text, "")
 
+    async def test_up_down_walk_history(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app = self.app(temp)
+            app.execute = lambda text: None
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                draft = app.query_one(Draft)
+                for word in ("one", "two"):
+                    draft.insert(word)
+                    await pilot.press("enter")
+                    await pilot.pause()
+                draft.insert("draft")
+                for key, want in (("up", "two"), ("up", "one"), ("up", "one"), ("down", "two"), ("down", "draft")):
+                    await pilot.press(key)
+                    await pilot.pause()
+                    self.assertEqual(draft.text, want)
+                draft.load_text("a\nb")
+                draft.move_cursor((1, 0))
+                await pilot.press("up")
+                await pilot.pause()
+                self.assertEqual(draft.cursor_location[0], 0)
+                self.assertEqual(draft.text, "a\nb")
+
     async def test_ctrl_c_reaches_cancel_while_editing(self):
         with tempfile.TemporaryDirectory() as temp:
             app = self.app(temp)
