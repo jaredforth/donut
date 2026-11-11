@@ -13,9 +13,10 @@ import subprocess
 import sys
 import tempfile
 import time
+from urllib.parse import unquote
 from rich.style import Style
 from rich.text import Text
-from textual import work
+from textual import events, work
 from textual.message import Message
 from textual.app import App
 from textual.binding import Binding
@@ -576,6 +577,25 @@ def shell_candidates(line, project):
     return word, out
 
 
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".bmp", ".tiff"}
+
+
+def dropped_images(text, project):
+    """Absolute paths if the whole paste is existing image files (escaped, quoted or file:// form), else []."""
+    text = text.strip()
+    try:
+        parts = [unquote(text[7:])] if text.startswith("file://") else shlex.split(text)
+    except ValueError:
+        parts = [text]
+    paths = []
+    for part in parts:
+        path = Path(project) / os.path.expanduser(part)  # absolute parts replace project
+        if path.suffix.lower() not in IMAGE_SUFFIXES or not path.is_file():
+            return []
+        paths.append(str(path))
+    return paths
+
+
 class Draft(TextArea):
     """The prompt editor. Enter sends; Shift+Enter, Alt+Enter or Ctrl+J insert a newline.
 
@@ -609,6 +629,16 @@ class Draft(TextArea):
         self.load_text(app.history_stash if app.history_at is None else app.history[app.history_at])
         self.move_cursor(self.document.end)
         return True
+
+    async def _on_paste(self, event):
+        paths = dropped_images(event.text, self.app.project)
+        if not paths:
+            return  # Textual runs TextArea._on_paste next (handlers chain up the MRO)
+        event.stop()
+        event.prevent_default()  # skip TextArea._on_paste, which would insert the raw text
+        if result := self._replace_via_keyboard(" ".join(shlex.quote(p) for p in paths) + " ", *self.selection):
+            self.move_cursor(result.end_location)
+            self.focus()
 
     async def _on_key(self, event):
         menu = self.app.query_one(Menu)

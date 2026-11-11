@@ -4,7 +4,9 @@ from types import SimpleNamespace
 import unittest
 from pathlib import Path
 from unittest.mock import patch, AsyncMock
-from donut.terminal import Donut, Draft, Menu, OptionList, RichLog, Static
+import shlex
+from textual import events
+from donut.terminal import dropped_images, Donut, Draft, Menu, OptionList, RichLog, Static
 
 # Never start real providers from the background usage refresh during tests.
 Donut.AUTO_REFRESH_QUOTAS = False
@@ -247,6 +249,43 @@ class DraftTests(unittest.IsolatedAsyncioTestCase):
                 first.usage = {"reported_cost_usd": 0.30}  # The turn ends: the reported cost replaces the estimate.
                 app.add_spent(first)
                 self.assertEqual(draft.border_subtitle, "$1.05 spent")
+
+
+class DroppedImageTests(unittest.IsolatedAsyncioTestCase):
+    def make(self, temp):
+        shot = Path(temp).resolve() / "shot one.png"
+        shot.write_bytes(b"x")
+        (Path(temp) / "notes.txt").write_text("x")
+        return str(shot)
+
+    def test_dropped_forms(self):
+        with tempfile.TemporaryDirectory() as temp:
+            shot = self.make(temp)
+            for text in (shot.replace(" ", "\\ "), "'" + shot + "'", "file://" + shot.replace(" ", "%20"), "shot\\ one.png"):
+                self.assertEqual(dropped_images(text, str(Path(temp).resolve())), [shot], text)
+
+    def test_dropped_rejects_non_images(self):
+        with tempfile.TemporaryDirectory() as temp:
+            shot = self.make(temp)
+            for text in (str(Path(temp) / "notes.txt"), str(Path(temp) / "a.png"), "look at " + shlex.quote(shot), "plain text"):
+                self.assertEqual(dropped_images(text, temp), [], text)
+
+    async def test_dropped_paste_inserts_quoted_path(self):
+        with tempfile.TemporaryDirectory() as temp:
+            shot = self.make(temp)
+            config = {"aliases": {"claude": {"engine": "claude"}}, "planner": "claude"}
+            with patch("donut.terminal.load", return_value=config):
+                app = Donut(Path(temp))
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                draft = app.query_one(Draft)
+                app.post_message(events.Paste(shot.replace(" ", "\\ ")))
+                await pilot.pause()
+                self.assertEqual(draft.text, shlex.quote(shot) + " ")
+                draft.load_text("")
+                app.post_message(events.Paste("hello world"))
+                await pilot.pause()
+                self.assertEqual(draft.text, "hello world")
 
 
 class SlashMenuTests(unittest.IsolatedAsyncioTestCase):
