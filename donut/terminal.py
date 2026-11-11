@@ -692,6 +692,7 @@ class Donut(App):
         self.project = project
         # Each window works from its own tickets folder, .donut/<session>/, made when it is first needed.
         self.session_name = session or workspace.new_name(project)
+        self.task_title = ""  # Window title from the first chat message; the tickets folder keeps its name.
         self.config = load()
         self.mode = "plan"  # plan, work, review or solo
         aliases = self.config.get("aliases", {})
@@ -1983,6 +1984,7 @@ class Donut(App):
             self.rename_session(" ".join(args))
         else:
             self.active = await self.session(self.selected[self.role], self.profiles[self.role], self.purpose)
+            self.name_task(text)
             self.start_turn(self.role)
             self.turn_text, self.shown, self.message_start, self.turn_tools = "", 0, 0, []
             await self.ask(text, plugins.translate(text, plugins.commands(self.profiles[self.role], self.project)))
@@ -2116,6 +2118,7 @@ class Donut(App):
         if self.auto and self.route is None and not await self.choose_route(text):
             return
         self.active = await self.session(self.selected["solo"], self.profiles["solo"], "solo")
+        self.name_task(text)
         self.start_turn("solo")
         self.turn_text, self.shown, self.message_start, self.turn_tools = "", 0, 0, []
         await self.ask(text)
@@ -2125,6 +2128,7 @@ class Donut(App):
     async def review_chat(self, text):
         """Ask the reviewer to check something, in a read-only conversation of its own."""
         self.active = await self.session(self.selected["review"], self.profiles["review"], "review")
+        self.name_task(text)
         self.start_turn("review", "", "reviewing")
         self.say(Text("> " + text, style=f"bold {ORANGE}"))
         self.turn_text, self.shown, self.message_start, self.turn_tools = "", 0, 0, []
@@ -2281,7 +2285,14 @@ class Donut(App):
         self.shell_runs.append((command, code, "\n".join(lines)))
 
     def session_label(self):
-        return self.session_name or "swim_lanes"
+        return self.task_title or self.session_name or "swim_lanes"
+
+    def name_task(self, text):
+        """The first chat message of the window names its tab; /rename or later messages do not get overridden by it."""
+        text = " ".join(text.split())
+        if not self.task_title and text and text[0] not in "/!":
+            self.task_title = _clip(text, 40)
+            self.show_title()
 
     def window_title(self):
         """What the terminal's window and tab show, so windows are easy to tell apart and switch between."""
@@ -2306,6 +2317,7 @@ class Donut(App):
             self.say(f"  Tickets folder not renamed: {error}", CORAL)
             return
         self.session_name = new
+        self.task_title = ""
         try:
             conversations.rename_session(self.project, old, new, " ".join(name.split())[:80])
         except OSError:
@@ -2479,6 +2491,7 @@ class Donut(App):
         before = ticket_snapshot(self.project, self.lanes)
         folder = workspace.relative(self.project, self.lanes)
         self.active = await self.session(self.selected["plan"], self.profiles["plan"])
+        self.name_task(text)
         self.start_turn("plan")
         prompt = (
             "Read skills/donut-planner/SKILL.md. Plan only: research and write scoped tickets; do not implement or commit. "

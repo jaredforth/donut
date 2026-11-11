@@ -1525,6 +1525,28 @@ class ResumeTests(unittest.IsolatedAsyncioTestCase):
             app.show_title()
             self.assertNotIn("\x1b]0;x", written[-1][4:])  # Control characters never reach the terminal.
 
+    async def test_the_first_chat_message_names_the_window(self):
+        app = self.make_app()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            written = []
+            original = app._driver.write
+            app._driver.write = lambda data: (written.append(data), original(data))
+            project = Path(self.temp.name).name
+            for text in ("/foo", "   ", "!ls"):
+                app.name_task(text)
+            self.assertEqual(app.task_title, "")
+            folder = app.session_name
+            app.name_task("fix the login bug on mobile")
+            self.assertIn(f"\x1b]0;fix the login bug on mobile · {project} · Donut\x07", written)
+            written.clear()
+            app.name_task("something else")
+            self.assertEqual(written, [])
+            self.assertEqual(app.session_name, folder)
+            app.rename_session("x y")
+            app.show_title()
+            self.assertEqual(written[-1], f"\x1b]0;x-y · {project} · Donut\x07")
+
     async def test_running_background_shells_show_in_the_status_line(self):
         app = self.make_app()
         async with app.run_test(size=(140, 40)) as pilot:
